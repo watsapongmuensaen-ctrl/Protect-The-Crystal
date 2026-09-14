@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Crystal Guardian ป้อมปราการเรขาคณิต</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Mitr:wght@400;600&display=swap');
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; font-family: 'Mitr', sans-serif; touch-action: none; }
+        #game-container { position: relative; width: 100vw; height: 100vh; }
+        
+        #physics-canvas { position: absolute; top: 0; left: 0; z-index: 1; }
+        #overlay-canvas { position: absolute; top: 0; left: 0; z-index: 2; pointer-events: none; }
+        
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; }
+        .interactive { pointer-events: auto; }
+        
+        #video-element { position: absolute; top: 140px; right: 24px; width: 160px; height: 120px; border-radius: 12px; border: 3px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); z-index: 5; background-color: #333; object-fit: cover; transform: scaleX(-1); pointer-events: none; }
+        
+        .glass-panel { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border-radius: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.5); }
+        .btn-spawn { transition: all 0.1s; position: relative; }
+        .btn-spawn:active:not(:disabled) { transform: scale(0.95); }
+        .btn-spawn:disabled { opacity: 0.5; filter: grayscale(100%); cursor: not-allowed; }
+        
+        /* Shape Visuals in UI */
+        .shape-square { width: 30px; height: 30px; background-color: #4CAF50; border: 2px solid #2E7D32; }
+        .shape-rect { width: 50px; height: 15px; background-color: #795548; border: 2px solid #4E342E; }
+        .shape-circle { width: 34px; height: 34px; background-color: #2196F3; border: 2px solid #1565C0; border-radius: 50%; }
+        .shape-triangle { width: 0; height: 0; border-left: 18px solid transparent; border-right: 18px solid transparent; border-bottom: 30px solid #FF9800; filter: drop-shadow(0px 2px 0px #E65100); }
+        .shape-hexagon { width: 30px; height: 17px; background-color: #9C27B0; position: relative; margin-top: 8px; margin-bottom: 8px;}
+        .shape-hexagon::before, .shape-hexagon::after { content: ""; position: absolute; left: 0; width: 0; height: 0; border-left: 15px solid transparent; border-right: 15px solid transparent; }
+        .shape-hexagon::before { bottom: 100%; border-bottom: 9px solid #9C27B0; }
+        .shape-hexagon::after { top: 100%; border-top: 9px solid #9C27B0; }
+        
+        .quota-badge { position: absolute; top: -8px; right: -8px; background: #FF5252; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+
+        #timer-container { position: absolute; top: 100px; left: 50%; transform: translateX(-50%); text-align: center; display: none; z-index: 20; pointer-events: none; }
+        .timer-text { font-size: 4rem; font-weight: bold; color: white; text-shadow: 0 4px 10px rgba(0,0,0,0.5), 0 0 20px rgba(255,255,255,0.5); }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="physics-canvas"></canvas>
+        <canvas id="overlay-canvas"></canvas>
+        <video id="video-element" autoplay playsinline></video>
+
+        <!-- Main Menu Overlay -->
+        <div id="main-menu" class="absolute top-0 left-0 w-full h-full bg-blue-900/90 backdrop-blur-md z-[100] flex flex-col items-center justify-center interactive">
+            <h1 class="text-4xl md:text-5xl font-bold text-white mb-4 drop-shadow-lg text-center leading-tight">💎 Crystal Guardian<br><span class="text-2xl md:text-3xl text-blue-200 mt-2 block">ป้อมปราการเรขาคณิต</span></h1>
+            <p class="text-blue-100 mb-12 text-lg text-center">สร้างป้อมปราการ ปกป้องเพชรจากลูกตุ้มยักษ์!</p>
+            
+            <div class="flex flex-col md:flex-row gap-6 w-11/12 max-w-3xl">
+                <button onclick="selectMode('challenge')" class="flex-1 glass-panel p-8 hover:bg-white/95 transition-transform hover:scale-105 cursor-pointer text-center group">
+                    <div class="text-5xl mb-4 group-hover:animate-bounce">🏆</div>
+                    <h2 class="text-3xl font-bold text-indigo-700">โหมดท้าทาย</h2>
+                    <p class="text-gray-600 mt-2 font-medium">ผ่านด่านโดยใช้รูปทรง<br><span class="text-red-500">"ที่มีจำนวนจำกัด"</span></p>
+                </button>
+                
+                <button onclick="selectMode('sandbox')" class="flex-1 glass-panel p-8 hover:bg-white/95 transition-transform hover:scale-105 cursor-pointer text-center group">
+                    <div class="text-5xl mb-4 group-hover:animate-bounce">🧱</div>
+                    <h2 class="text-3xl font-bold text-green-700">โหมดอิสระ</h2>
+                    <p class="text-gray-600 mt-2 font-medium">สร้างป้อมปราการได้ไม่อั้น<br><span class="text-green-600">"ทรัพยากรไม่จำกัด (∞)"</span></p>
+                </button>
+            </div>
+        </div>
+
+        <div id="timer-container">
+            <p class="text-white text-xl drop-shadow-md">ป้องกันให้ได้ใน:</p>
+            <div id="countdown-text" class="timer-text">5.0</div>
+        </div>
+
+        <div class="absolute bottom-2 right-3 md:bottom-3 md:right-4 z-[200] text-white text-xs md:text-sm font-medium tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] pointer-events-none">
+            Created by ครูวรรษพงษ์ หมื่นแสน
+        </div>
+
+        <div id="ui-layer" class="p-4 md:p-6 hidden">
+            
+            <div class="flex justify-between items-start">
+                <div class="glass-panel p-4 interactive">
+                    <h1 class="text-xl md:text-2xl font-bold text-indigo-700" id="ui-mode-title">💎 Crystal Guardian</h1>
+                    <p class="text-gray-700 text-sm mt-1" id="level-display">กำลังโหลด...</p>
+                    <p class="text-indigo-600 text-xs mt-1 font-semibold">💡 บิดข้อมือ (AR) หรือ หมุนลูกกลิ้งเมาส์ เพื่อหมุนรูปทรง</p>
+                    <div id="camera-status" class="text-xs font-bold text-red-500 mt-2">🔴 กล้องยังไม่เปิด (กำมือ AR เพื่อกดปุ่มได้)</div>
+                </div>
+                
+                <div class="flex flex-col gap-2 items-end interactive">
+                    <button id="btn-camera" class="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold shadow-lg transition">
+                        📷 เปิดกล้อง AR
+                    </button>
+                    <div class="flex gap-2">
+                        <button id="btn-home" onclick="showMainMenu()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-bold shadow-lg transition hidden">
+                            🏠 เมนูหลัก
+                        </button>
+                        <button id="btn-restart-level" onclick="showLevelIntro()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-xl font-bold shadow-lg transition hidden">
+                            🔄 เริ่มใหม่
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="level-intro" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 glass-panel p-8 flex-col items-center interactive w-80 text-center z-50">
+                <h2 id="intro-title" class="text-3xl font-bold text-indigo-600 mb-4">ด่านที่ 1</h2>
+                <div class="bg-blue-50 w-full p-4 rounded-xl mb-4">
+                    <p class="text-lg font-semibold text-gray-800">น้ำหนักลูกตุ้ม: <span id="intro-weight" class="text-red-500 font-bold">10 kg</span></p>
+                    <p class="text-lg font-semibold text-gray-800 mt-1">ความสูง: <span id="intro-height" class="text-blue-500 font-bold">ระดับต่ำ</span></p>
+                </div>
+                <p class="text-sm text-gray-600 mb-4" id="intro-hint">* ป้องกันเพชรให้รอดครบ 5 วินาที!</p>
+                <button onclick="startBuilding()" class="w-full bg-green-500 hover:bg-green-600 text-white text-xl font-bold py-3 px-6 rounded-xl shadow-lg border-b-4 border-green-700 active:border-b-0 active:translate-y-1 transition-all">
+                    🛠️ เริ่มสร้างที่กำบัง!
+                </button>
+            </div>
+
+            <div id="result-screen" class="hidden absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 glass-panel p-8 flex-col items-center interactive z-50">
+                <h2 id="result-title" class="text-4xl font-bold mb-2">ผลลัพธ์</h2>
+                <p id="result-desc" class="text-gray-600 mb-6 text-center text-lg">...</p>
+                <button id="btn-next-action" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-8 rounded-xl shadow-lg border-b-4 border-blue-700 active:border-b-0 active:translate-y-1 transition-all">
+                    เล่นอีกครั้ง
+                </button>
+            </div>
+
+            <div id="bottom-tools" class="hidden absolute top-0 left-0 w-full h-full pointer-events-none z-10">
+                
+                <div class="absolute left-2 md:left-6 top-1/2 transform -translate-y-1/2 glass-panel p-2 md:p-3 flex flex-col gap-2 pointer-events-auto">
+                    <button id="btn-square" class="btn-spawn bg-white hover:bg-gray-50 border-2 border-gray-200 rounded-xl p-2 flex flex-col items-center justify-center min-w-[70px] h-20 shadow-sm flex-shrink-0 cursor-grab active:cursor-grabbing">
+                        <div class="shape-square mb-1"></div>
+                        <span class="text-xs font-bold text-gray-700">กล่อง</span>
+                        <div id="quota-square" class="quota-badge">0</div>
+                    </button>
+                    
+                    <button id="btn-rect" class="btn-spawn bg-white hover:bg-gray-50 border-2 border-gray-200 rounded-xl p-2 flex flex-col items-center justify-center min-w-[70px] h-20 shadow-sm flex-shrink-0 cursor-grab active:cursor-grabbing">
+                        <div class="shape-rect mb-1"></div>
+                        <span class="text-xs font-bold text-gray-700">คานยาว</span>
+                        <div id="quota-rect" class="quota-badge">0</div>
+                    </button>
+
+                    <button id="btn-triangle" class="btn-spawn bg-white hover:bg-gray-50 border-2 border-gray-200 rounded-xl p-2 flex flex-col items-center justify-center min-w-[70px] h-20 shadow-sm flex-shrink-0 cursor-grab active:cursor-grabbing">
+                        <div class="shape-triangle mb-1"></div>
+                        <span class="text-xs font-bold text-gray-700">สามเหลี่ยม</span>
+                        <div id="quota-triangle" class="quota-badge">0</div>
+                    </button>
+
+                    <button id="btn-circle" class="btn-spawn bg-white hover:bg-gray-50 border-2 border-gray-200 rounded-xl p-2 flex flex-col items-center justify-center min-w-[70px] h-20 shadow-sm flex-shrink-0 cursor-grab active:cursor-grabbing">
+                        <div class="shape-circle mb-1"></div>
+                        <span class="text-xs font-bold text-gray-700">วงกลม</span>
+                        <div id="quota-circle" class="quota-badge">0</div>
+                    </button>
+
+                    <button id="btn-hexagon" class="btn-spawn bg-white hover:bg-gray-50 border-2 border-gray-200 rounded-xl p-2 flex flex-col items-center justify-center min-w-[70px] h-20 shadow-sm flex-shrink-0 cursor-grab active:cursor-grabbing">
+                        <div class="shape-hexagon mb-1"></div>
+                        <span class="text-xs font-bold text-gray-700">หกเหลี่ยม</span>
+                        <div id="quota-hexagon" class="quota-badge">0</div>
+                    </button>
+                </div>
+
+                <button id="btn-drop" onclick="dropThreat()" class="absolute bottom-6 md:bottom-10 right-4 md:right-8 bg-red-500 hover:bg-red-600 text-white text-lg md:text-2xl font-bold py-3 px-6 md:py-4 md:px-8 rounded-2xl shadow-2xl border-b-4 border-red-700 active:border-b-0 active:translate-y-1 transition-all animate-pulse pointer-events-auto">
+                    ⚠️ ปล่อยลูกตุ้ม!
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const levels = [
+            { 
+                id: 1, title: 'ด่านที่ 1: ปราการเริ่มต้น', weightStr: '10 kg (เบา)', heightStr: 'ระดับต่ำ', dropY: window.innerHeight * 0.2, density: 0.2, radius: 60,
+                quota: { square: 2, rect: 1, triangle: 2, circle: 0, hexagon: 0 }
+            },
+            { 
+                id: 2, title: 'ด่านที่ 2: สะพานโค้ง', weightStr: '50 kg (ปานกลาง)', heightStr: 'ระดับกลาง', dropY: window.innerHeight * 0.1, density: 1.0, radius: 75,
+                quota: { square: 1, rect: 2, triangle: 2, circle: 2, hexagon: 0 }
+            },
+            { 
+                id: 3, title: 'ด่านที่ 3: ระวังหัว!', weightStr: '100 kg (หนัก)', heightStr: 'ระดับสูง', dropY: -100, density: 2.0, radius: 90,
+                quota: { square: 2, rect: 1, triangle: 1, circle: 1, hexagon: 2 }
+            },
+            { 
+                id: 4, title: 'ด่านที่ 4: อุกกาบาตพิฆาต', weightStr: '500 kg (หนักมาก!)', heightStr: 'ระดับทะลุฟ้า', dropY: -300, density: 5.0, radius: 120,
+                quota: { square: 0, rect: 3, triangle: 2, circle: 2, hexagon: 2 }
+            }
+        ];
+
+        let currentMode = 'challenge';
+        let currentLevelIndex = 0;
+        let isGameRunning = false;
+        let gameResult = null; 
+        let currentQuota = {};
+        let survivalTime = 5.0; 
+        let timerInterval = null;
+        
+        let width = window.innerWidth;
+        let height = window.innerHeight;
+
+        const Engine = Matter.Engine,
+              Render = Matter.Render,
+              Runner = Matter.Runner,
+              Bodies = Matter.Bodies,
+              Composite = Matter.Composite,
+              Constraint = Matter.Constraint,
+              Mouse = Matter.Mouse,
+              MouseConstraint = Matter.MouseConstraint,
+              Events = Matter.Events,
+              Vector = Matter.Vector;
+
+        let engine, render, runner, world;
+        let crystal, threat;
+        let blocks = []; 
+        let mouseConstraint; 
+
+        function showMainMenu() {
+            document.getElementById('main-menu').classList.remove('hidden');
+            document.getElementById('main-menu').classList.add('flex');
+            document.getElementById('ui-layer').classList.add('hidden');
+            
+            isGameRunning = false;
+            stopTimer();
+            if(world) {
+                Composite.clear(world);
+                Engine.clear(engine);
+            }
+        }
+
+        function selectMode(mode) {
+            currentMode = mode;
+            currentLevelIndex = 0;
+            
+            const modeTitle = mode === 'challenge' ? '💎 Crystal Guardian (โหมดท้าทาย)' : '💎 Crystal Guardian (โหมดอิสระ)';
+            document.getElementById('ui-mode-title').innerText = modeTitle;
+            
+            document.getElementById('main-menu').classList.add('hidden');
+            document.getElementById('main-menu').classList.remove('flex');
+            document.getElementById('ui-layer').classList.remove('hidden');
+            
+            if(!engine) initPhysics(); 
+            showLevelIntro();
+        }
+
+        function initPhysics() {
+            engine = Engine.create();
+            world = engine.world;
+
+            render = Render.create({
+                canvas: document.getElementById('physics-canvas'),
+                engine: engine,
+                options: { width, height, wireframes: false, background: 'transparent' }
+            });
+
+            Render.run(render);
+            runner = Runner.create();
+            Runner.run(runner, engine);
+
+            setupMouseInteraction();
+
+            // Collision logic
+            Events.on(engine, 'collisionStart', function(event) {
+                handleDamage(event.pairs);
+            });
+            
+            // เช็คแรงกดทับอย่างต่อเนื่อง
+            Events.on(engine, 'collisionActive', function(event) {
+                handleDamage(event.pairs);
+            });
+            
+            Events.on(engine, 'afterUpdate', checkWinCondition);
+        }
+
+        // --- ระบบเรขาคณิตพังถล่ม (Destruction System) ---
+        function shatterBlock(blockBody) {
+            // ลบตัวเต็มออกจากฉาก
+            Composite.remove(world, blockBody);
+            
+            // ลบออกจากรายการบล็อก เพื่อไม่ให้ AR ไปจับอากาศ
+            blocks = blocks.filter(b => b.id !== blockBody.id);
+
+            // หากเมาส์จับอยู่ ให้ปล่อย
+            if (draggedBodyByMouse && draggedBodyByMouse.id === blockBody.id) {
+                draggedBodyByMouse = null;
+            }
+
+            // หากมือ AR จับอยู่ ให้สลายเชือกดึง
+            Object.values(handsData).forEach(hand => {
+                if (hand.grabbedBody && hand.grabbedBody.id === blockBody.id) {
+                    if (hand.constraint) {
+                        Composite.remove(world, hand.constraint);
+                        hand.constraint = null;
+                    }
+                    hand.grabbedBody = null;
+                }
+            });
+
+            // สร้างเศษซากชิ้นเล็กๆ
+            for (let j = 0; j < 4; j++) {
+                let debris = Bodies.polygon(
+                    blockBody.position.x + (Math.random() * 40 - 20),
+                    blockBody.position.y + (Math.random() * 40 - 20),
+                    Math.floor(Math.random() * 3) + 3, // เสก 3 ถึง 5 เหลี่ยม
+                    15,
+                    {
+                        density: 0.02,
+                        friction: 0.5,
+                        render: { 
+                            fillStyle: blockBody.render.fillStyle,
+                            strokeStyle: blockBody.render.strokeStyle,
+                            lineWidth: 1
+                        }
+                    }
+                );
+                Composite.add(world, debris);
+            }
+        }
+
+        function handleDamage(pairs) {
+            if (gameResult || !isGameRunning) return;
+            
+            for (let i = 0; i < pairs.length; i++) {
+                const { bodyA, bodyB } = pairs[i];
+
+                // เช็คว่าเพชรแตกไหม
+                if ((bodyA.label === 'crystal' && bodyB.label === 'threat') || 
+                    (bodyB.label === 'crystal' && bodyA.label === 'threat')) {
+                    gameOver(false); 
+                    return;
+                }
+
+                // เช็คการกระแทกใส่บล็อกเรขาคณิต
+                let threatBody = bodyA.label === 'threat' ? bodyA : (bodyB.label === 'threat' ? bodyB : null);
+                let blockBody = bodyA.label === 'block' ? bodyA : (bodyB.label === 'block' ? bodyB : null);
+
+                if (threatBody && blockBody && blockBody.plugin && blockBody.plugin.hp > 0) {
+                    const speed = Vector.magnitude(threatBody.velocity);
+                    
+                    // คำนวณความเสียหายจาก แรงกระแทก (ความเร็ว) + แรงกดทับ (น้ำหนักลูกตุ้ม)
+                    const impactDamage = speed * threatBody.density * 2.0;
+                    const crushDamage = threatBody.density * 1.5; 
+                    const damage = impactDamage + crushDamage;
+
+                    blockBody.plugin.hp -= damage;
+                    
+                    // บล็อกเริ่มโปร่งใส (มีรอยร้าว) ตามเลือดที่ลดลง
+                    const hpPercent = blockBody.plugin.hp / blockBody.plugin.maxHp;
+                    blockBody.render.opacity = Math.max(0.3, hpPercent);
+
+                    if (blockBody.plugin.hp <= 0) {
+                        shatterBlock(blockBody);
+                    }
+                }
+            }
+        }
+        // ---------------------------------------------
+
+        function buildWorld() {
+            Composite.clear(world);
+            Engine.clear(engine);
+            blocks = [];
+            gameResult = null;
+            isGameRunning = false;
+
+            const currentLevel = levels[currentLevelIndex];
+            currentQuota = { ...currentLevel.quota };
+            updateQuotaUI();
+
+            const ground = Bodies.rectangle(width / 2, height - 30, width * 2, 60, { 
+                isStatic: true, render: { fillStyle: '#7CB342' } 
+            });
+            const leftWall = Bodies.rectangle(-25, height/2, 50, height * 2, { isStatic: true });
+            const rightWall = Bodies.rectangle(width+25, height/2, 50, height * 2, { isStatic: true });
+
+            crystal = Bodies.polygon(width / 2, height - 80, 4, 40, { 
+                label: 'crystal',
+                isStatic: true, angle: Math.PI / 4, 
+                render: { fillStyle: '#00FFFF', strokeStyle: '#FFFFFF', lineWidth: 4 }
+            });
+
+            threat = Bodies.circle(width / 2, currentLevel.dropY, currentLevel.radius, {
+                label: 'threat',
+                isStatic: true, density: currentLevel.density, friction: 0.3, restitution: 0.1,
+                render: { fillStyle: '#212121', strokeStyle: '#FF5252', lineWidth: 3 }
+            });
+
+            Composite.add(world, [ground, leftWall, rightWall, crystal, threat]);
+            if (mouseConstraint) Composite.add(world, mouseConstraint);
+        }
+
+        function setupMouseInteraction() {
+            const mouse = Mouse.create(render.canvas);
+            mouseConstraint = MouseConstraint.create(engine, {
+                mouse: mouse,
+                constraint: { stiffness: 0.8, damping: 0.5, render: { visible: false } }
+            });
+            render.mouse = mouse;
+
+            // Mouse Wheel Rotation Logic
+            render.canvas.addEventListener('wheel', function(event) {
+                if (mouseConstraint.body && !isGameRunning) {
+                    event.preventDefault();
+                    const rotationStep = Math.PI / 12; // 15 องศาต่อการหมุนกึกหนึ่ง
+                    const direction = event.deltaY > 0 ? 1 : -1;
+                    Matter.Body.setAngle(mouseConstraint.body, mouseConstraint.body.angle + direction * rotationStep);
+                }
+            }, { passive: false });
+        }
+
+        function updateQuotaUI() {
+            const types = ['square', 'rect', 'triangle', 'circle', 'hexagon'];
+            types.forEach(type => {
+                const btn = document.getElementById(`btn-${type}`);
+                const badge = document.getElementById(`quota-${type}`);
+                
+                if (currentMode === 'sandbox') {
+                    badge.innerText = "∞";
+                    badge.style.background = '#4CAF50';
+                    btn.disabled = false;
+                } else {
+                    const count = currentQuota[type];
+                    badge.innerText = count;
+                    if (count <= 0) {
+                        btn.disabled = true;
+                        badge.style.background = '#9E9E9E';
+                    } else {
+                        btn.disabled = false;
+                        badge.style.background = '#FF5252';
+                    }
+                }
+            });
+        }
+
+        function showLevelIntro() {
+            const level = levels[currentLevelIndex];
+            
+            document.getElementById('level-display').innerText = `กำลังเล่น: ${level.title}`;
+            document.getElementById('intro-title').innerText = `ด่านที่ ${level.id}`;
+            document.getElementById('intro-weight').innerText = level.weightStr;
+            document.getElementById('intro-height').innerText = level.heightStr;
+            
+            document.getElementById('intro-hint').innerText = currentMode === 'sandbox' ? '* สร้างได้ไม่อั้น ป้องกันให้ครบ 5 วินาที!' : '* ป้องกันเพชรให้รอดครบ 5 วินาที!';
+            
+            document.getElementById('level-intro').style.display = 'flex';
+            document.getElementById('bottom-tools').classList.add('hidden');
+            document.getElementById('result-screen').classList.add('hidden');
+            document.getElementById('btn-restart-level').classList.add('hidden');
+            document.getElementById('btn-home').classList.add('hidden');
+            document.getElementById('timer-container').style.display = 'none';
+            
+            stopTimer(); 
+            buildWorld(); 
+        }
+
+        function startBuilding() {
+            document.getElementById('level-intro').style.display = 'none';
+            document.getElementById('bottom-tools').classList.remove('hidden');
+            document.getElementById('btn-restart-level').classList.remove('hidden');
+            document.getElementById('btn-home').classList.remove('hidden');
+        }
+
+        let draggedBodyByMouse = null;
+
+        function createShapeBody(shape, spawnX, spawnY) {
+            let block;
+            const options = { 
+                density: 0.05, 
+                friction: 0.9, 
+                restitution: 0.05, 
+                frictionAir: 0.02,
+                label: 'block' // เพิ่ม label ให้ระบบรู้ว่าเป็นบล็อกที่พังได้
+            };
+            
+            let hp = 100;
+
+            if (shape === 'square') {
+                options.render = { fillStyle: '#4CAF50', strokeStyle: '#2E7D32', lineWidth: 2 };
+                hp = 150;
+                block = Bodies.rectangle(spawnX, spawnY, 90, 90, options);
+            } else if (shape === 'rect') {
+                options.render = { fillStyle: '#795548', strokeStyle: '#4E342E', lineWidth: 2 };
+                hp = 50; // คานยาวพังง่ายสุด
+                block = Bodies.rectangle(spawnX, spawnY, 210, 38, options);
+            } else if (shape === 'triangle') {
+                options.render = { fillStyle: '#FF9800', strokeStyle: '#E65100', lineWidth: 2 };
+                hp = 100;
+                block = Bodies.polygon(spawnX, spawnY, 3, 60, options);
+                Matter.Body.setAngle(block, -Math.PI/6); 
+            } else if (shape === 'circle') {
+                options.render = { fillStyle: '#2196F3', strokeStyle: '#1565C0', lineWidth: 2 };
+                hp = 150;
+                block = Bodies.circle(spawnX, spawnY, 53, options);
+            } else if (shape === 'hexagon') {
+                options.render = { fillStyle: '#9C27B0', strokeStyle: '#6A1B9A', lineWidth: 2 };
+                hp = 300; // แข็งแกร่งที่สุด
+                block = Bodies.polygon(spawnX, spawnY, 6, 60, options);
+            }
+            
+            // บันทึกความทนทาน (HP) ของบล็อก
+            block.plugin = { hp: hp, maxHp: hp };
+
+            return block;
+        }
+
+        function initDragAndDropUI() {
+            const types = ['square', 'rect', 'triangle', 'circle', 'hexagon'];
+            
+            types.forEach(type => {
+                const btn = document.getElementById(`btn-${type}`);
+                btn.addEventListener('pointerdown', (e) => {
+                    if (isGameRunning || btn.disabled) return;
+                    if (currentMode === 'challenge' && currentQuota[type] <= 0) return;
+                    e.preventDefault();
+                    
+                    if (currentMode === 'challenge') {
+                        currentQuota[type]--;
+                        updateQuotaUI();
+                    }
+                    
+                    draggedBodyByMouse = createShapeBody(type, e.clientX, e.clientY);
+                    Matter.Body.setStatic(draggedBodyByMouse, true); 
+                    
+                    blocks.push(draggedBodyByMouse);
+                    Composite.add(world, draggedBodyByMouse);
+                });
+            });
+            
+            window.addEventListener('pointermove', (e) => {
+                if (draggedBodyByMouse) {
+                    Matter.Body.setPosition(draggedBodyByMouse, { x: e.clientX, y: e.clientY });
+                }
+            });
+            
+            window.addEventListener('pointerup', (e) => {
+                if (draggedBodyByMouse) {
+                    Matter.Body.setStatic(draggedBodyByMouse, false);
+                    draggedBodyByMouse = null;
+                }
+            });
+        }
+
+        function dropThreat() {
+            if (isGameRunning || gameResult) return;
+            isGameRunning = true;
+            document.getElementById('bottom-tools').classList.add('hidden');
+            Matter.Body.setStatic(threat, false);
+            startTimer();
+        }
+
+        function startTimer() {
+            survivalTime = 5.0;
+            const timerContainer = document.getElementById('timer-container');
+            const countdownText = document.getElementById('countdown-text');
+            
+            timerContainer.style.display = 'block';
+            countdownText.innerText = survivalTime.toFixed(1);
+            countdownText.style.color = 'white';
+
+            timerInterval = setInterval(() => {
+                if (gameResult) {
+                    stopTimer();
+                    return;
+                }
+
+                survivalTime -= 0.1;
+                
+                if (survivalTime <= 0) {
+                    survivalTime = 0;
+                    countdownText.innerText = "0.0";
+                    stopTimer();
+                    if (!gameResult) gameOver(true); 
+                } else {
+                    countdownText.innerText = survivalTime.toFixed(1);
+                    if(survivalTime <= 2.0) countdownText.style.color = '#FF5252'; 
+                    else if(survivalTime <= 3.5) countdownText.style.color = '#FFEB3B';
+                }
+            }, 100);
+        }
+
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
+        function checkWinCondition() {
+            if (!isGameRunning || gameResult) return;
+            if (threat.position.y > height + 100) {
+                 if (!gameResult) gameOver(true);
+            }
+        }
+
+        function gameOver(isWin) {
+            gameResult = isWin ? 'win' : 'lose';
+            stopTimer();
+            
+            const screen = document.getElementById('result-screen');
+            const title = document.getElementById('result-title');
+            const desc = document.getElementById('result-desc');
+            const btn = document.getElementById('btn-next-action');
+            const countdownText = document.getElementById('countdown-text');
+            
+            screen.classList.remove('hidden');
+            screen.classList.add('flex');
+            
+            if (isWin) {
+                title.innerText = "⏳ รอดพ้น!";
+                title.className = "text-4xl font-bold text-green-500 mb-2 drop-shadow-md";
+                countdownText.style.color = '#4CAF50';
+                
+                if (currentLevelIndex < levels.length - 1) {
+                    desc.innerText = "คุณป้องกันเพชรได้ครบ 5 วินาที! ไประดับที่ยากขึ้นกันเถอะ";
+                    btn.innerText = "ไปด่านต่อไป ➡️";
+                    btn.className = "bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-xl shadow-lg border-b-4 border-green-700 active:border-b-0 active:translate-y-1 transition-all";
+                    btn.onclick = () => { currentLevelIndex++; showLevelIntro(); };
+                } else {
+                    desc.innerText = "🎉 คุณเคลียร์ทุกด่านแล้ว! วิศวกรตัวน้อยเก่งมาก!";
+                    btn.innerText = "เล่นใหม่ตั้งแต่ด่าน 1";
+                    btn.className = "bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 px-8 rounded-xl shadow-lg border-b-4 border-purple-700 active:border-b-0 active:translate-y-1 transition-all";
+                    btn.onclick = () => { currentLevelIndex = 0; showLevelIntro(); };
+                }
+            } else {
+                title.innerText = "💥 เพชรแตกแล้ว!";
+                title.className = "text-4xl font-bold text-red-500 mb-2 drop-shadow-md";
+                desc.innerText = `ป้องกันไปได้แค่ ${(5.0 - survivalTime).toFixed(1)} วินาที\nลองวางโครงสร้างใหม่ให้แข็งแรงกว่านี้ดูนะ`;
+                btn.innerText = "🔄 ลองด่านนี้ใหม่";
+                btn.className = "bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-8 rounded-xl shadow-lg border-b-4 border-red-700 active:border-b-0 active:translate-y-1 transition-all";
+                btn.onclick = showLevelIntro;
+                
+                crystal.render.fillStyle = '#FF0000'; 
+            }
+        }
+
+        const videoElement = document.getElementById('video-element');
+        const overlayCanvas = document.getElementById('overlay-canvas');
+        const overlayCtx = overlayCanvas.getContext('2d');
+        
+        let isCameraOn = false;
+        
+        // เพิ่มตัวแปรสำหรับเก็บองศาการหมุนมือ
+        const handsData = {
+            'Hand_0': { x: 0, y: 0, isGrabbing: false, constraint: null, grabbedBody: null, initialHandAngle: 0, initialBodyAngle: 0 },
+            'Hand_1': { x: 0, y: 0, isGrabbing: false, constraint: null, grabbedBody: null, initialHandAngle: 0, initialBodyAngle: 0 }
+        };
+
+        function isHandClosed(landmarks) {
+            const wrist = landmarks[0];
+            let foldedFingers = 0;
+            const fingerTips = [8, 12, 16, 20]; 
+            const fingerMcp = [5, 9, 13, 17]; 
+
+            for (let i = 0; i < fingerTips.length; i++) {
+                const tip = landmarks[fingerTips[i]];
+                const mcp = landmarks[fingerMcp[i]];
+                const distTip = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+                const distMcp = Math.hypot(mcp.x - wrist.x, mcp.y - wrist.y);
+                if (distTip < distMcp) foldedFingers++;
+            }
+            return foldedFingers >= 3;
+        }
+
+        function checkUIHover(x, y) {
+            const types = ['square', 'rect', 'triangle', 'circle', 'hexagon'];
+            for(let type of types) {
+                const btn = document.getElementById(`btn-${type}`);
+                if(btn && !btn.disabled) {
+                    if(currentMode === 'challenge' && currentQuota[type] <= 0) continue;
+                    
+                    const rect = btn.getBoundingClientRect();
+                    if(x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                        return type;
+                    }
+                }
+            }
+            return null;
+        }
+
+        function initHandTracking() {
+            document.getElementById('btn-camera').addEventListener('click', async () => {
+                if(isCameraOn) return;
+                
+                const statusText = document.getElementById('camera-status');
+                statusText.innerText = "กำลังโหลดระบบ AR... (อาจใช้เวลาสักครู่)";
+                statusText.className = "text-xs font-bold text-yellow-500 mt-2";
+
+                try {
+                    const hands = new Hands({locateFile: (file) => {
+                        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                    }});
+
+                    hands.setOptions({
+                        maxNumHands: 2,
+                        modelComplexity: 1,
+                        minDetectionConfidence: 0.6,
+                        minTrackingConfidence: 0.6
+                    });
+
+                    hands.onResults(onHandResults);
+
+                    const camera = new Camera(videoElement, {
+                        onFrame: async () => { await hands.send({image: videoElement}); },
+                        width: 320, height: 240
+                    });
+
+                    await camera.start();
+                    
+                    isCameraOn = true;
+                    statusText.innerText = "🟢 พร้อมใช้: แบมือ = เล็ง, กำมือ = หยิบจับ, บิดข้อมือ = หมุน";
+                    statusText.className = "text-xs font-bold text-green-500 mt-2";
+                    document.getElementById('btn-camera').style.display = 'none';
+
+                } catch (error) {
+                    console.error(error);
+                    statusText.innerText = "❌ ไม่สามารถเปิดกล้องได้: เบราว์เซอร์บล็อก หรือต้องรันผ่าน https://";
+                    statusText.className = "text-xs font-bold text-red-600 mt-2 bg-red-100 p-2 rounded";
+                    alert("ไม่สามารถเปิดกล้องได้!\n\n1. ตรวจสอบว่าอนุญาตให้ใช้กล้องหรือยัง\n2. ต้องรันผ่านเซิร์ฟเวอร์ (Live Server) หรือรันบนเว็บที่รองรับ HTTPS");
+                }
+            });
+        }
+
+        function onHandResults(results) {
+            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            const activeHands = [];
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const numHands = Math.min(results.multiHandLandmarks.length, 2);
+                
+                for (let i = 0; i < numHands; i++) {
+                    const handId = `Hand_${i}`;
+                    activeHands.push(handId);
+                    
+                    const landmarks = results.multiHandLandmarks[i];
+                    
+                    // จุดข้อมือ (0) และ กลางฝ่ามือ (9)
+                    const wrist = landmarks[0];
+                    const palmCenter = landmarks[9];
+                    
+                    // ตำแหน่งเคอร์เซอร์ (แกน x สลับเพราะวิดีโอกระจกเงา)
+                    const cursorX = (1 - palmCenter.x) * width;
+                    const cursorY = palmCenter.y * height;
+                    
+                    const wristX = (1 - wrist.x) * width;
+                    const wristY = wrist.y * height;
+                    
+                    // คำนวณองศาความเอียงของมือจากข้อมือไปยังฝ่ามือ
+                    const handAngle = Math.atan2(cursorY - wristY, cursorX - wristX);
+                    
+                    handsData[handId].x = cursorX;
+                    handsData[handId].y = cursorY;
+
+                    const wasGrabbing = handsData[handId].isGrabbing;
+                    const isGrabbingNow = isHandClosed(landmarks);
+                    handsData[handId].isGrabbing = isGrabbingNow;
+
+                    overlayCtx.beginPath();
+                    overlayCtx.arc(cursorX, cursorY, isGrabbingNow ? 15 : 25, 0, 2 * Math.PI);
+                    overlayCtx.fillStyle = isGrabbingNow ? 'rgba(255, 50, 50, 0.8)' : 'rgba(50, 150, 255, 0.4)';
+                    overlayCtx.fill();
+                    overlayCtx.strokeStyle = 'white';
+                    overlayCtx.lineWidth = 3;
+                    overlayCtx.stroke();
+                    
+                    overlayCtx.font = "20px Mitr";
+                    overlayCtx.fillStyle = "white";
+                    overlayCtx.textAlign = "center";
+                    overlayCtx.fillText(isGrabbingNow ? "✊" : "🖐️", cursorX, cursorY + 7);
+
+                    // Physics หยิบจับและการกดปุ่ม UI
+                    if (isGrabbingNow && !wasGrabbing) {
+                        let uiClicked = false;
+                        
+                        // ซ่อน canvas ฟิสิกส์ชั่วคราวเพื่อหาปุ่มที่อยู่ด้านล่าง
+                        const physicsCanvas = document.getElementById('physics-canvas');
+                        physicsCanvas.style.pointerEvents = 'none';
+                        const element = document.elementFromPoint(cursorX, cursorY);
+                        physicsCanvas.style.pointerEvents = 'auto';
+
+                        if (element) {
+                            const button = element.closest('button');
+                            if (button && !button.disabled && !button.classList.contains('btn-spawn')) {
+                                button.click(); 
+                                uiClicked = true;
+                                const originalTransform = button.style.transform;
+                                button.style.transform = 'scale(0.9)';
+                                setTimeout(() => { button.style.transform = originalTransform; }, 150);
+                            }
+                        }
+
+                        // ถ้าไม่ได้กดปุ่ม ให้เช็คการจับเรขาคณิต
+                        if (!uiClicked && !isGameRunning) {
+                            const hoveredUI = checkUIHover(cursorX, cursorY);
+                            
+                            if (hoveredUI) {
+                                if(currentMode === 'challenge') {
+                                    currentQuota[hoveredUI]--;
+                                    updateQuotaUI();
+                                }
+                                
+                                const body = createShapeBody(hoveredUI, cursorX, cursorY);
+                                blocks.push(body);
+                                Composite.add(world, body);
+                                
+                                // เก็บค่ามุมตั้งต้นของมือและของวัตถุ
+                                handsData[handId].grabbedBody = body;
+                                handsData[handId].initialHandAngle = handAngle;
+                                handsData[handId].initialBodyAngle = body.angle;
+                                
+                                handsData[handId].constraint = Constraint.create({
+                                    pointA: { x: cursorX, y: cursorY },
+                                    bodyB: body,
+                                    pointB: { x: 0, y: 0 }, 
+                                    stiffness: 0.8, damping: 0.5, render: { visible: false }
+                                });
+                                Composite.add(world, handsData[handId].constraint);
+                                
+                            } else {
+                                const point = { x: cursorX, y: cursorY };
+                                const found = Matter.Query.point(blocks, point); 
+                                
+                                if (found.length > 0) {
+                                    const body = found[0];
+                                    
+                                    // เก็บค่ามุมตั้งต้นของมือและของวัตถุ
+                                    handsData[handId].grabbedBody = body;
+                                    handsData[handId].initialHandAngle = handAngle;
+                                    handsData[handId].initialBodyAngle = body.angle;
+
+                                    handsData[handId].constraint = Constraint.create({
+                                        pointA: { x: cursorX, y: cursorY },
+                                        bodyB: body,
+                                        pointB: { x: cursorX - body.position.x, y: cursorY - body.position.y },
+                                        stiffness: 0.8, damping: 0.5, render: { visible: false }
+                                    });
+                                    Composite.add(world, handsData[handId].constraint);
+                                }
+                            }
+                        }
+                    } 
+                    // กำมือค้างไว้ (ลากและหมุน)
+                    else if (isGrabbingNow && handsData[handId].constraint) {
+                        handsData[handId].constraint.pointA = { x: cursorX, y: cursorY };
+                        
+                        // ระบบหมุนวัตถุ (Rotation)
+                        if (handsData[handId].grabbedBody) {
+                            // หาความต่างขององศามือปัจจุบัน กับตอนที่เริ่มจับ
+                            const deltaAngle = handAngle - handsData[handId].initialHandAngle;
+                            // นำไปบวกกับองศาเดิมของวัตถุ
+                            Matter.Body.setAngle(handsData[handId].grabbedBody, handsData[handId].initialBodyAngle + deltaAngle);
+                            
+                            // ลดความเร็วการแกว่ง
+                            Matter.Body.setAngularVelocity(handsData[handId].grabbedBody, 0);
+                        }
+                    } 
+                    // ปล่อยมือ
+                    else if (!isGrabbingNow && handsData[handId].constraint) {
+                        Composite.remove(world, handsData[handId].constraint);
+                        handsData[handId].constraint = null;
+                        handsData[handId].grabbedBody = null;
+                    }
+                }
+            }
+
+            // จัดการกรณีมือหลุดออกนอกจอ
+            Object.keys(handsData).forEach(handId => {
+                if (!activeHands.includes(handId)) {
+                    if (handsData[handId].constraint) {
+                        Composite.remove(world, handsData[handId].constraint);
+                        handsData[handId].constraint = null;
+                        handsData[handId].grabbedBody = null;
+                    }
+                    handsData[handId].isGrabbing = false;
+                }
+            });
+        }
+
+        window.onload = () => {
+            initDragAndDropUI();
+            overlayCanvas.width = width;
+            overlayCanvas.height = height;
+            initHandTracking();
+            showMainMenu();
+        };
+
+        window.onresize = () => {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            if (render) {
+                render.canvas.width = width;
+                render.canvas.height = height;
+                render.options.width = width;
+                render.options.height = height;
+            }
+            overlayCanvas.width = width;
+            overlayCanvas.height = height;
+            
+            if(document.getElementById('main-menu').classList.contains('hidden')) {
+                if(!isGameRunning && gameResult === null) showLevelIntro(); 
+            }
+        };
+
+    </script>
+</body>
+</html>
